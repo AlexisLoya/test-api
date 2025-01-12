@@ -36,6 +36,13 @@ class Order(BaseModel):
     items: List[OrderItem]
     rounds: List[Round]
 
+class StockItem(BaseModel):
+    name: str
+    quantity: int
+
+class StockRequest(BaseModel):
+    items: List[StockItem]
+
 class Stock(BaseModel):
     last_updated: datetime
     beers: List[Beer]

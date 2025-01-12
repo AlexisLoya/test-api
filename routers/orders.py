@@ -1,9 +1,9 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import APIRouter, HTTPException
 from datetime import datetime
 from typing import List
 import random
 
-from .models import (
+from models.orders import (
     Beer,
     OrderRequest,
     OrderItem,
@@ -13,9 +13,10 @@ from .models import (
     Friend,
     Order, 
     Stock,
+    StockRequest,
 )
-app = FastAPI(title="Beer Order and Payment API", version="1.0")
 
+router = APIRouter()
 # Constants
 
 TAX_RATE = 0.19
@@ -48,6 +49,14 @@ current_order = Order(
 )
 
 # Helper Functions
+def fill_stock(stock_request: StockRequest):
+    for item in stock_request.items:
+        existing_beer = next((beer for beer in stock.beers if beer.name == item.name), None)
+        if existing_beer:
+            existing_beer.quantity += item.quantity
+        else:
+            stock.beers.append(Beer(name=item.name, price=item.price, quantity=item.quantity))
+    stock.last_updated = datetime.now()
 
 def calculate_order_totals():
     grouped_items = {}
@@ -77,53 +86,64 @@ def calculate_order_totals():
     current_order.total = total
 
 
-def update_stock_and_order(order_request: OrderRequest):
-    beer = next((b for b in stock.beers if b.name == order_request.name), None)
-    if not beer:
-        raise HTTPException(status_code=404, detail=f"Beer {order_request.name} not found")
+def update_stock_and_order(order_requests: List[OrderRequest]):
+    new_round = Round(
+        created=datetime.now(),
+        items=[
+            RoundItem(name=req.name, quantity=req.quantity, person=req.user.strip())
+            for req in order_requests
+        ],
+    )
 
-    if beer.quantity < order_request.quantity:
-        raise HTTPException(status_code=400, detail=f"Not enough stock for {order_request.name}")
+    for req in order_requests:
+        beer = next((b for b in stock.beers if b.name == req.name), None)
+        if not beer:
+            raise HTTPException(status_code=404, detail=f"Beer {req.name} not found")
 
-    total = beer.price * order_request.quantity
-    beer.quantity -= order_request.quantity
+        if beer.quantity < req.quantity:
+            raise HTTPException(
+                status_code=400, detail=f"Not enough stock for {req.name}"
+            )
 
-    current_order.items.append(OrderItem(name=order_request.name, quantity=order_request.quantity, total=total))
+        total = beer.price * req.quantity
+        beer.quantity -= req.quantity
 
-    # Combine rounds
-    if current_order.rounds and (current_order.rounds[-1].created.date() == datetime.now().date()):
-        current_order.rounds[-1].items.append(RoundItem(name=order_request.name, quantity=order_request.quantity, person=order_request.user.strip()))
-    else:
-        current_order.rounds.append(Round(
-            created=datetime.now(),
-            items=[RoundItem(name=order_request.name, quantity=order_request.quantity, person=order_request.user.strip())],
-        ))
+        current_order.items.append(
+            OrderItem(name=req.name, quantity=req.quantity, total=total)
+        )
 
-    # Register dynamic friends
-    if order_request.user.strip() not in friends:
-        friends[order_request.user.strip()] = Friend(name=order_request.user.strip(), balance=0)
+        if req.user.strip() not in friends:
+            friends[req.user.strip()] = Friend(name=req.user.strip(), balance=0)
+
+    current_order.rounds.append(new_round)
 
     calculate_order_totals()
 
+
 # endpoints
-@app.get("/stock", response_model=Stock)
+@router.post("/fill-stock")
+def fill_stock_endpoint(stock_request: StockRequest):
+    """Fill the stock with new items."""
+    fill_stock(stock_request)
+    return {"message": "Stock filled successfully", "stock": stock}
+
+@router.get("/stock", response_model=Stock)
 def list_beers():
     """List available beers in stock."""
     return stock
 
-@app.post("/order")
+@router.post("/order")
 def place_order(order_request: List[OrderRequest]):
     """Place an order for beers."""
-    for req in order_request:
-        update_stock_and_order(req)
+    update_stock_and_order(order_request)
     return {"message": "Order placed", "order": current_order}
 
-@app.get("/bill", response_model=Order)
+@router.get("/bill", response_model=Order)
 def get_bill():
     """Retrieve the current bill."""
     return current_order
 
-@app.put("/pay")
+@router.put("/pay")
 def pay_bill(pay_request: PayRequest):
     """Pay the bill either equally or individually."""
     if current_order.paid:
