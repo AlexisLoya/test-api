@@ -1,6 +1,7 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from typing import List, Optional
 from datetime import datetime
+from enum import Enum
 
 class Beer(BaseModel):
     name: str
@@ -25,9 +26,15 @@ class Round(BaseModel):
     created: datetime
     items: List[RoundItem]
 
+class PaidModeEnum(str, Enum):
+    individual = 'individual'
+    equal = 'equal'
+    unknown = 'unknown'
+
 class Order(BaseModel):
     created: datetime
     paid: bool
+    paid_mode: PaidModeEnum
     subtotal: float
     taxes: float
     discounts: float
@@ -35,6 +42,7 @@ class Order(BaseModel):
     total: float
     items: List[OrderItem]
     rounds: List[Round]
+
 
 class StockItem(BaseModel):
     name: str
@@ -54,4 +62,11 @@ class OrderRequest(BaseModel):
 
 class PayRequest(BaseModel):
     mode: str
-    friend_name: Optional[str] = None
+    friend: Optional[str] = None
+    
+    @field_validator('friend', mode='before')
+    def check_friend(cls, v, values):
+        if values.data.get('mode') == PaidModeEnum.individual and not v:
+            raise ValueError('friend is required when mode is individual')
+        return v
+

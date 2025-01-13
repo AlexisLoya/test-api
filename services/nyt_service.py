@@ -12,6 +12,8 @@ class NYTService:
     
     books_cache = set()
 
+    genres_cache = []
+
     def fetch_books(self, genre: str):
         """
         Busca libros del NYT según el género.
@@ -37,6 +39,25 @@ class NYTService:
                 amazon_url=book.get("amazon_product_url")
             ))
         return books
+    
+    def fetch_genres(self):
+        """
+        Fetch the genres available.
+        """
+        url = f"{self.BASE_URL}/lists/names.json"
+        params = {"api-key": self.API_KEY}
+        response = requests.get(url, params=params)
+        if response.status_code != 200:
+            log_message(f'Error to find genres: {response.status_code}')
+            response.raise_for_status()
+        log_message(f'Genres found: {len(response.json().get("results", []))}')
+        for genre in response.json().get("results", []):
+            self.genres_cache.append({
+                "list_name": genre.get("list_name"),
+                "display_name": genre.get("display_name"),
+                "list_name_encoded": genre.get("list_name_encoded")
+            })
+        return response.json().get("results", [])
 
     def reset_books(self):
         """

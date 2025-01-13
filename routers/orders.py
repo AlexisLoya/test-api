@@ -10,6 +10,7 @@ from models.orders import (
     Round,
     RoundItem,
     PayRequest,
+    PaidModeEnum,
     Friend,
     Order, 
     Stock,
@@ -44,6 +45,7 @@ current_order = Order(
     discounts=0,
     discounts_str="",
     total=0,
+    paid_mode="unknown",
     items=[],
     rounds=[],
 )
@@ -147,21 +149,60 @@ def get_bill():
 def pay_bill(pay_request: PayRequest):
     """Pay the bill either equally or individually."""
     if current_order.paid:
-        raise HTTPException(status_code=400, detail="Bill already paid")
+        raise HTTPException(status_code=400, detail="The bill has already been paid.")
 
-    if pay_request.mode == "equal":
+    if pay_request.mode == PaidModeEnum.equal:
+        current_order.paid_mode = PaidModeEnum.equal
+
         share = round(current_order.total / len(friends), 2)
+
+        total_paid = sum(friend.balance for friend in friends.values())
+        if total_paid + (share * len(friends)) > current_order.total:
+            raise HTTPException(
+                status_code=400, detail="The payment exceeds the total bill."
+            )
+
         for friend in friends.values():
-            friend.balance -= share
-    elif pay_request.mode == "individual":
+            friend.balance += share
+
+    elif pay_request.mode == PaidModeEnum.individual:
+        current_order.paid_mode = PaidModeEnum.individual
+
+        friend = friends.get(pay_request.friend)
+        if not friend:
+            raise HTTPException(status_code=404, detail=f"Friend {pay_request.friend} not found.")
+
+        individual_total = 0
         for round_item in current_order.rounds:
             for item in round_item.items:
-                friend = friends.get(item.person)
-                if not friend:
-                    raise HTTPException(status_code=404, detail=f"Friend {item.person} not found")
-                friend.balance -= item.quantity * next((b.price for b in stock.beers if b.name == item.name), 0)
+                if item.person == pay_request.friend:
+                    beer_price = next((b.price for b in stock.beers if b.name == item.name), 0)
+                    item_total = item.quantity * beer_price
+                    item_taxes = item_total * TAX_RATE
+                    item_discount = item_total * (current_order.discounts / current_order.subtotal) if current_order.subtotal > 0 else 0
+                    individual_total += item_total + item_taxes - item_discount
+
+        friend_paid = friend.balance
+        remaining_amount = individual_total - friend_paid
+        if remaining_amount <= 0:
+            raise HTTPException(
+                status_code=400,
+                detail=f"{pay_request.friend} has already paid their total amount.",
+            )
+
+        payment = min(remaining_amount, current_order.total - sum(f.balance for f in friends.values()))
+        friend.balance += payment
     else:
         raise HTTPException(status_code=400, detail="Invalid payment mode")
 
-    current_order.paid = True
-    return {"message": "Bill paid", "remaining_balances": list(friends.values())}
+    total_paid = sum(friend.balance for friend in friends.values())
+    if total_paid >= current_order.total:
+        current_order.paid = True
+    print(total_paid, current_order.total)
+    return {
+        "message": "Payment processed successfully.",
+        "remaining_balances": {f.name: f.balance for f in friends.values()},
+        "bill_status": "Paid" if current_order.paid else "Pending",
+        "order": current_order,
+    }
+

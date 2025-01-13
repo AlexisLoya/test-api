@@ -49,3 +49,14 @@ def get_logs():
         return {"logs": logs}
     except FileNotFoundError:
         return {"logs": "No logs found"}
+
+@router.get("/genres")
+def fetch_genres_endpoint():
+    """
+    Fetch the genres available from NYT.
+    """
+    try:
+        genres = nyt_service.fetch_genres()
+        return {"message": "Genres fetched successfully", "genres": genres}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching genres: {str(e)}")
