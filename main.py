@@ -4,7 +4,7 @@ from routers import orders, nyt
 app = FastAPI(title="Cometa Test API", version="1.0")
 
 # Registrar los routers
-app.include_router(orders.router, prefix="/beers", tags=["beers"])
+app.include_router(orders.router, prefix="/beers", tags=["Beers Orders"])
 app.include_router(nyt.router, prefix="/nyt", tags=["NYT Integration"])
 
 @app.get("/")
